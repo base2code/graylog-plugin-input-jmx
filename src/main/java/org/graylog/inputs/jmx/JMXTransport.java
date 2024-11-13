@@ -30,6 +30,7 @@ import org.graylog2.plugin.inputs.transports.Transport;
 import org.graylog2.plugin.journal.RawMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import scala.util.parsing.combinator.testing.Str;
 
 import javax.management.MBeanServerConnection;
 import javax.management.ObjectName;
@@ -211,7 +212,9 @@ public class JMXTransport implements Transport {
                     if (attribute.getKey() != null) {
                         mapKey += attribute.getKey();
                     }
-                    configuredAttributes.put(mapKey,
+                    String queryStr = queryBuilder.build().getObj();
+                    queryStr = queryStr.replace("*", "");
+                    configuredAttributes.put(queryStr + "+" + mapKey,
                             attribute);
                 }
                 queries.add(queryBuilder.build());
@@ -233,7 +236,7 @@ public class JMXTransport implements Transport {
                     for (Query query : queries) {
                         HashMultimap<ObjectName, Result> results = queryProcessor.processQuery(connection, query);
                         for (Map.Entry<ObjectName, Result> entry : results.entries()) {
-                            processResult(event, entry);
+                            processResult(event, entry, query);
                         }
                     }
                     publishToGLServer(event);
@@ -283,10 +286,12 @@ public class JMXTransport implements Transport {
 
 
         //process JMXTrans result object as per configured json
-        private void processResult(Map<String, Object> event, Map.Entry<ObjectName, Result> objectResult) {
+        private void processResult(Map<String, Object> event, Map.Entry<ObjectName, Result> objectResult, Query query) {
             Result result = objectResult.getValue();
             String attrName = result.getAttributeName();
             Set<String> resultKeys = result.getValues().keySet();
+            String queryStr = query.getObj();
+            queryStr = queryStr.replace("*", "");
 
             Map<String, String> objectProperties = new HashMap<>();
 
@@ -296,21 +301,14 @@ public class JMXTransport implements Transport {
 
             for (String key : resultKeys) {
                 String label;
-                String attrKey = attrName;
-                if (attrName.equals(key)) {
-                    if (configuredAttributes.containsKey(attrKey)) {
-                        if (configuredAttributes.get(attrKey).getLabel() != null) {
-                            label = formatLabel(objectProperties, configuredAttributes.get(attrKey).getLabel());
-                            event.put("_" + label, result.getValues().get(key));
-                        }
-                    }
-                } else {
+                String attrKey = queryStr + "+" + attrName;
+                if (!attrName.equals(key)) {
                     attrKey += key;
-                    if (configuredAttributes.containsKey(attrKey)) {
-                        if (configuredAttributes.get(attrKey).getLabel() != null) {
-                            label = formatLabel(objectProperties, configuredAttributes.get(attrKey).getLabel());
-                            event.put("_" + label, result.getValues().get(key));
-                        }
+                }
+                if (configuredAttributes.containsKey(attrKey)) {
+                    if (configuredAttributes.get(attrKey).getLabel() != null) {
+                        label = formatLabel(objectProperties, configuredAttributes.get(attrKey).getLabel());
+                        event.put("_" + label, result.getValues().get(key));
                     }
                 }
             }
